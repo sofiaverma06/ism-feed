@@ -3,7 +3,7 @@
 Machine-readable ISM Manufacturing history for the regime-rotation trading algorithm.
 
 `ism_history.csv` is consumed at runtime by a QuantConnect live algorithm. It is
-**data, not decoration** — a wrong row changes real orders.
+data — a wrong row changes real orders.
 
 ## Format
 
