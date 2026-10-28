@@ -1,0 +1,69 @@
+name: Update ISM feed
+
+# Runs every 20 min, 10:00-17:59 ET (14:00-21:59 UTC covers EDT and EST), days 1-5 of each month.
+# The script is idempotent: once the month's row is in the CSV every later run is a no-op.
+# Release is published the first business day at 10:00 ET. GitHub cron is best-effort (runs can be late).
+on:
+  schedule:
+    - cron: "*/20 14-21 1-5 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Target month YYYY-MM (blank = previous calendar month, ET)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (do everything except write/commit)"
+        type: boolean
+        default: true
+      verify_last:
+        description: "Read-only: check the CSV's last row against the official release (good first test)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-ism
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run updater
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_MONTH: ${{ inputs.month }}
+          IN_DRY: ${{ inputs.dry_run }}
+          IN_VERIFY: ${{ inputs.verify_last }}
+        run: |
+          ARGS=""
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ -n "$IN_MONTH" ]; then ARGS="$ARGS --month $IN_MONTH"; fi
+            if [ "$IN_DRY" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+            if [ "$IN_VERIFY" = "true" ]; then ARGS="$ARGS --verify-last"; fi
+          fi
+          python update_ism.py $ARGS
+
+      - name: Commit new row (only if the file changed)
+        if: github.event_name == 'schedule' || inputs.dry_run == false
+        run: |
+          if git diff --quiet -- ism_history.csv; then
+            echo "no change"
+            exit 0
+          fi
+          LAST=$(tail -n 1 ism_history.csv)
+          git config user.name "ism-feed-bot"
+          git config user.email "ism-feed-bot@users.noreply.github.com"
+          git add ism_history.csv
+          git commit -m "ISM: add ${LAST%%,*} (${LAST})"
+          git push
